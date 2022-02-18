@@ -34,7 +34,39 @@
 
 #include <bimur_robot_vision/TabletopPerception.h>
 
+#include <actionlib/client/simple_action_client.h>
+#include <control_msgs/FollowJointTrajectoryAction.h>
+
+// moveit
+#include <moveit/planning_scene_interface/planning_scene_interface.h>
+#include <moveit_msgs/DisplayRobotState.h>
+#include <moveit_msgs/DisplayTrajectory.h>
+#include <moveit/move_group_interface/move_group_interface.h>
+#include <moveit_msgs/GetPositionIK.h>
+
 ros::Publisher pose_pub;
+
+ros::ServiceClient ik_client;
+
+geometry_msgs::PoseStamped current_button_pose;
+moveit::planning_interface::MoveGroupInterface *group;
+
+bool g_caught_sigint = false;
+
+void sig_handler(int sig){
+    g_caught_sigint = true;
+    ROS_INFO("caugt sigint, init shutdown seq...");
+    ros::shutdown();
+    exit(1);
+}
+
+// Blocking call for user input
+void pressEnter(){
+	std::cout << "Press the ENTER key to continue";
+	while (std::cin.get() != '\n')
+		std::cout << "Please press ENTER\n";
+}
+
 
 void detectObjects(ros::NodeHandle n){
 	//step 1: call the button detection service and get the response
@@ -124,20 +156,18 @@ void detectObjects(ros::NodeHandle n){
 		
 		//roll rotates around x axis
 		
-		stampOut.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(0.0,0.0,0.0);
-		//stampOut.pose.position.z+=0.125;
+		stampOut.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(3.14/2, 3.14/2,0.0);
+		stampOut.pose.position.z+=0.30;
 		//stampOut.pose.position.x+=0.09;
 		
 		ROS_INFO_STREAM(stampOut);
 		
 		pose_pub.publish(stampOut);
-
-		ros::spin();
 		
 		//store pose
-		//current_button_pose = stampOut;
+		current_button_pose = stampOut;
 	
-	
+		ros::spinOnce();
 	
 		//step 4.5. adjust post xyz and/or orientation so that the pose is above the button and oriented correctly
 	
@@ -145,17 +175,65 @@ void detectObjects(ros::NodeHandle n){
 	}
 }
 
+void moveAboveObject() {
+	
+	ROS_INFO("Starting to move above object");
+		
+	group->setPoseReferenceFrame(current_button_pose.header.frame_id);
+	group->setPoseTarget(current_button_pose);
+	
+	
+    group->setStartState(*group->getCurrentState());
+    
+    moveit_msgs::GetPositionIK::Request ik_request;
+    moveit_msgs::GetPositionIK::Response ik_response;
+    ik_request.ik_request.group_name = "manipulator";
+    ik_request.ik_request.pose_stamped = current_button_pose;
+    
+    ik_client.call(ik_request, ik_response);
+    
+    ROS_INFO_STREAM(ik_response);
+    
+    ROS_INFO("Starting to plan...");
+    
+    moveit::planning_interface::MoveGroupInterface::Plan my_plan;
+    moveit::planning_interface::MoveItErrorCode success = group->plan(my_plan);
+    ROS_INFO("Planning success: %s", success ? "true" : "false");
+
+    if (!success) {
+        return;
+    }
+    
+    pressEnter();
+    
+    moveit::planning_interface::MoveItErrorCode error = group->move();
+}
 
 int main(int argc, char **argv) {
 	// Intialize ROS with this node name
 	ros::init(argc, argv, "move_arm");
 
 	ros::NodeHandle n;
+	ros::AsyncSpinner spinner(1);
+    spinner.start();
+    
+	ik_client = n.serviceClient<moveit_msgs::GetPositionIK>("/compute_ik");
 	
 	//button position publisher
 	pose_pub = n.advertise<geometry_msgs::PoseStamped>("/move_arm_demo/pose", 10);
 	
+	ROS_INFO("Demo starting...Move the arm to a 'ready' position that does not occlude the table.");
+	pressEnter();
+	
 	detectObjects(n);
+	
+	pressEnter();
+	
+	group = new moveit::planning_interface::MoveGroupInterface("manipulator");
+    group->setGoalTolerance(0.01);
+    
+    
+	moveAboveObject();
 	
 
 	return 0;

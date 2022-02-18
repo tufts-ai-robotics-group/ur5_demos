@@ -10,6 +10,8 @@ add_compile_options(-std=c++11)
 find_package(catkin REQUIRED COMPONENTS
   bimur_robot_vision
   moveit_msgs
+  moveit_core
+  moveit_ros_planning_interface
   roscpp
   rospy
   std_msgs
