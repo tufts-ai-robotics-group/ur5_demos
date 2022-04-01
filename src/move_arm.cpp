@@ -44,6 +44,16 @@
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit_msgs/GetPositionIK.h>
 
+/*
+  joint_states of a pose out of the way
+  name: [elbow_joint, shoulder_lift_joint, shoulder_pan_joint, wrist_1_joint, wrist_2_joint,
+  wrist_3_joint]
+  position: [1.7994565963745117, -1.304173771535055, 0.46854838728904724, -2.487392250691549, -4.015228335057394, -0.6358125845538538]
+  velocity: [-0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  effort: [1.1388397216796875, 2.6812055110931396, 1.275590181350708, 0.4529372453689575, 0.16012932360172272, 0.06405173242092133]
+
+ */
+
 ros::Publisher pose_pub;
 
 ros::ServiceClient ik_client;
@@ -65,6 +75,20 @@ void pressEnter(){
 	std::cout << "Press the ENTER key to continue";
 	while (std::cin.get() != '\n')
 		std::cout << "Please press ENTER\n";
+}
+
+int detectForceVal(const double force_threshold, const double timeout){
+	
+	
+}
+
+void close_gripper(){
+	
+	
+}
+
+void open_gripper(){
+	
 }
 
 
@@ -157,7 +181,7 @@ void detectObjects(ros::NodeHandle n){
 		//roll rotates around x axis
 		
 		stampOut.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(3.14/2, 3.14/2,0.0);
-		stampOut.pose.position.z+=0.30;
+		stampOut.pose.position.z+=0.25;
 		//stampOut.pose.position.x+=0.09;
 		
 		ROS_INFO_STREAM(stampOut);
@@ -207,6 +231,47 @@ void moveAboveObject() {
     pressEnter();
     
     moveit::planning_interface::MoveItErrorCode error = group->move();
+
+}
+
+
+void moveToObj(){
+	
+
+	//Reduce the offset created when calling DetectObjects() by lowering frame 
+	current_button_pose.pose.position.z -= 0.10;
+	group->setPoseReferenceFrame(current_button_pose.header.frame_id);
+	group->setPoseTarget(current_button_pose);
+	
+	
+    group->setStartState(*group->getCurrentState());
+    
+    moveit_msgs::GetPositionIK::Request ik_request;
+    moveit_msgs::GetPositionIK::Response ik_response;
+    ik_request.ik_request.group_name = "manipulator";
+    ik_request.ik_request.pose_stamped = current_button_pose;
+    
+    ik_client.call(ik_request, ik_response);
+    
+    ROS_INFO_STREAM(ik_response);
+    
+    ROS_INFO("Starting to plan...");
+    
+    moveit::planning_interface::MoveGroupInterface::Plan my_plan;
+    moveit::planning_interface::MoveItErrorCode success = group->plan(my_plan);
+    ROS_INFO("Planning success: %s", success ? "true" : "false");
+
+    if (!success) {
+        return;
+    }
+    
+    pressEnter();
+    
+	ROS_INFO("Moving down...");
+    moveit::planning_interface::MoveItErrorCode error = group->move();
+    
+	
+	
 }
 
 int main(int argc, char **argv) {
@@ -222,7 +287,7 @@ int main(int argc, char **argv) {
 	//button position publisher
 	pose_pub = n.advertise<geometry_msgs::PoseStamped>("/move_arm_demo/pose", 10);
 	
-	ROS_INFO("Demo starting...Move the arm to a 'ready' position that does not occlude the table.");
+	ROS_INFO("Demo starting...Move the arm to a 'ready' position that does not include the table.");
 	pressEnter();
 	
 	detectObjects(n);
@@ -235,6 +300,20 @@ int main(int argc, char **argv) {
     
 	moveAboveObject();
 	
+	pressEnter();
+	
+	ROS_INFO("Planning for pick up...");
+	group = new moveit::planning_interface::MoveGroupInterface("manipulator");
+    group->setGoalTolerance(0.01);
+    
+    moveToObj();
+ 
+    pressEnter();
+    
+    group = new moveit::planning_interface::MoveGroupInterface("gripper");
+    group->setGoalTolerance(0.01);
+    close_gripper();
+    
 
 	return 0;
 }
