@@ -43,6 +43,10 @@
 #include <moveit_msgs/DisplayTrajectory.h>
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit_msgs/GetPositionIK.h>
+#include <robotiq_85_msgs/GripperCmd.h>
+
+
+
 
 /*
   joint_states of a pose out of the way
@@ -55,11 +59,15 @@
  */
 
 ros::Publisher pose_pub;
+ros::Publisher gripper_pub;
 
 ros::ServiceClient ik_client;
 
 geometry_msgs::PoseStamped current_button_pose;
 moveit::planning_interface::MoveGroupInterface *group;
+
+float Z_OFFSET = 0.25;
+float NEW_Z_OFFSET = 0.0;
 
 bool g_caught_sigint = false;
 
@@ -77,18 +85,37 @@ void pressEnter(){
 		std::cout << "Please press ENTER\n";
 }
 
-int detectForceVal(const double force_threshold, const double timeout){
+
+
+bool close_gripper(){
 	
 	
+
+	robotiq_85_msgs::GripperCmd msg;
+	msg.position = 0.0;
+	msg.speed = 1.0;
+	msg.force = 100.0;
+	gripper_pub.publish(msg);
+
+	ros::spinOnce();
+	
+	
+	return 0;
 }
 
-void close_gripper(){
+bool open_gripper(){
 	
-	
-}
+	robotiq_85_msgs::GripperCmd msg;
+	msg.position = 1.0;
+	msg.speed = 1.0;
+	msg.force = 100.0;
+	gripper_pub.publish(msg);
 
-void open_gripper(){
+	ros::spinOnce();
 	
+	
+	return 0;
+
 }
 
 
@@ -181,7 +208,7 @@ void detectObjects(ros::NodeHandle n){
 		//roll rotates around x axis
 		
 		stampOut.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(3.14/2, 3.14/2,0.0);
-		stampOut.pose.position.z+=0.25;
+		stampOut.pose.position.z+= Z_OFFSET;
 		//stampOut.pose.position.x+=0.09;
 		
 		ROS_INFO_STREAM(stampOut);
@@ -240,6 +267,8 @@ void moveToObj(){
 
 	//Reduce the offset created when calling DetectObjects() by lowering frame 
 	current_button_pose.pose.position.z -= 0.10;
+	
+	
 	group->setPoseReferenceFrame(current_button_pose.header.frame_id);
 	group->setPoseTarget(current_button_pose);
 	
@@ -269,9 +298,43 @@ void moveToObj(){
     
 	ROS_INFO("Moving down...");
     moveit::planning_interface::MoveItErrorCode error = group->move();
+    current_button_pose.pose.position.z += 0.10;
+	
+}
+
+void move_to_pos(){
+	
     
+	group->setPoseReferenceFrame(current_button_pose.header.frame_id);
+	group->setPoseTarget(pose);
 	
 	
+    group->setStartState(*group->getCurrentState());
+    
+    moveit_msgs::GetPositionIK::Request ik_request;
+    moveit_msgs::GetPositionIK::Response ik_response;
+    ik_request.ik_request.group_name = "manipulator";
+    ik_request.ik_request.pose_stamped = pose;
+    
+    ik_client.call(ik_request, ik_response);
+    
+    ROS_INFO_STREAM(ik_response);
+    
+    ROS_INFO("Starting to plan...");
+    
+    moveit::planning_interface::MoveGroupInterface::Plan my_plan;
+    moveit::planning_interface::MoveItErrorCode success = group->plan(my_plan);
+    ROS_INFO("Planning success: %s", success ? "true" : "false");
+
+    if (!success) {
+        return;
+    }
+    
+    pressEnter();
+    
+	ROS_INFO("Moving down...");
+    moveit::planning_interface::MoveItErrorCode error = group->move();
+
 }
 
 int main(int argc, char **argv) {
@@ -287,8 +350,15 @@ int main(int argc, char **argv) {
 	//button position publisher
 	pose_pub = n.advertise<geometry_msgs::PoseStamped>("/move_arm_demo/pose", 10);
 	
+	//gripper command publisher
+	gripper_pub = n.advertise<robotiq_85_msgs::GripperCmd>("/gripper/cmd",10);
+	
+	
 	ROS_INFO("Demo starting...Move the arm to a 'ready' position that does not include the table.");
 	pressEnter();
+	open_gripper();
+	
+	
 	
 	detectObjects(n);
 	
@@ -302,17 +372,21 @@ int main(int argc, char **argv) {
 	
 	pressEnter();
 	
-	ROS_INFO("Planning for pick up...");
-	group = new moveit::planning_interface::MoveGroupInterface("manipulator");
-    group->setGoalTolerance(0.01);
     
     moveToObj();
  
     pressEnter();
     
-    group = new moveit::planning_interface::MoveGroupInterface("gripper");
-    group->setGoalTolerance(0.01);
     close_gripper();
+    
+    moveAboveObject(); 
+    
+    pressEnter();
+    
+    move_to_pos();
+    
+	pressEnter();
+    
     
 
 	return 0;
