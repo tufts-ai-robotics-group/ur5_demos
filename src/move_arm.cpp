@@ -306,7 +306,7 @@ void move_to_pos(){
 	
     
 	group->setPoseReferenceFrame(current_button_pose.header.frame_id);
-	group->setPoseTarget(pose);
+	group->setPoseTarget(current_button_pose);
 	
 	
     group->setStartState(*group->getCurrentState());
@@ -314,7 +314,7 @@ void move_to_pos(){
     moveit_msgs::GetPositionIK::Request ik_request;
     moveit_msgs::GetPositionIK::Response ik_response;
     ik_request.ik_request.group_name = "manipulator";
-    ik_request.ik_request.pose_stamped = pose;
+    ik_request.ik_request.pose_stamped = current_button_pose;
     
     ik_client.call(ik_request, ik_response);
     
